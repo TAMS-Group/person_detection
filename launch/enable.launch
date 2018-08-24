@@ -1,0 +1,4 @@
+<launch>
+  <node pkg="rostopic" type="rostopic" name="rostopic" args="pub /person_detection/enable std_msgs/Empty -1"/>
+  <!--<node pkg="rostopic" type="rostopic" name="rostopic" args="pub /person_detection/set_enabled std_msgs/Bool '{data: True}' -1"/>-->
+</launch>

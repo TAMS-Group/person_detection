@@ -10,17 +10,33 @@ import PIL.Image
 import numpy
 import numpy as np
 #import operator
+import sensor_msgs
+import std_msgs
+import person_detection
+import person_detection.msg
+
+rospy.init_node("person_detection", anonymous=True)
 
 #db = "haarcascade_frontalface_default.xml"
 #db = "haarcascade_frontalface_alt.xml"
 #db = "haarcascade_frontalcatface_extended.xml"
 #db = "haarcascade_fullbody.xml"
-db = "haarcascade_frontalface_alt2.xml"
+#db = "haarcascade_frontalface_alt2.xml"
+db = rospy.get_param("~face_detector_model")
 face_cascade = cv2.CascadeClassifier(db)
 
 bridge = CvBridge()
 
-face_marker = cv2.imread('smiley-1635449_960_720.png', cv2.IMREAD_UNCHANGED)
+pub_image_visualization = rospy.Publisher("~visualization", sensor_msgs.msg.Image)
+
+#face_marker = cv2.imread('smiley-1635449_960_720.png', cv2.IMREAD_UNCHANGED)
+#print("a", rospy.search_param("face_marker"))
+#print("b", rospy.get_param(rospy.search_param("face_marker")))
+#face_marker = cv2.imread(rospy.get_param(rospy.search_param("face_marker")), cv2.IMREAD_UNCHANGED)
+
+face_marker = rospy.get_param("~face_marker")
+print("b", face_marker)
+face_marker = cv2.imread(face_marker, cv2.IMREAD_UNCHANGED)
 
 face_marker[:,:,3] -= face_marker[:,:,3] / 3
 
@@ -28,7 +44,31 @@ depth = False
 
 color_image = False
 
-cv2.namedWindow("image", cv2.WINDOW_NORMAL)
+#cv2.namedWindow("image", cv2.WINDOW_NORMAL)
+
+enabled = False
+
+def enable(x):
+    global enabled
+    print("enable")
+    enabled = True
+
+def disable(x):
+    global enabled
+    print("disable")
+    enabled = False
+
+def set_enabled(x):
+    global enabled
+    x = x.data
+    print("set_enabled", x)
+    enabled = x
+
+sub_enable = rospy.Subscriber("~enable", std_msgs.msg.Empty, enable)
+sub_disable = rospy.Subscriber("~disable", std_msgs.msg.Empty, disable)
+sub_disable = rospy.Subscriber("~set_enabled", std_msgs.msg.Bool, set_enabled)
+
+pub_person_detections = rospy.Publisher("~person_detections", person_detection.msg.PersonDetections)
 
 def image_callback(data):
     global bridge, face_cascade, depth, color_image
@@ -58,13 +98,15 @@ def update():
         return
     image = image.copy()
 
-    image = cv2.resize(image, (0,0), fx=1.1, fy=1.1)
+    if False:
+        image = cv2.resize(image, (0,0), fx=1.1, fy=1.1)
+
     y = (image.shape[1] - color_image.shape[1]) / 2
     x = (image.shape[0] - color_image.shape[0]) / 2
     w = color_image.shape[1]
     h = color_image.shape[0]
     image = image[y:y+h,x:x+w,:]
-    print x, y, w, h, image.shape
+    #print x, y, w, h, image.shape
 
     #a = cv2.getRotationMatrix2D((m.shape[0]/2, m.shape[1]/2), rospy.Time.now().to_sec() * 300, 1)
     #image = cv2.warpAffine(image, a, (image.shape[0], image.shape[1]))
@@ -76,10 +118,10 @@ def update():
 
     gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
 
-    cv2.imshow("gray", gray)
-    cv2.waitKey(1)
+    #cv2.imshow("gray", gray)
+    #cv2.waitKey(1)
 
-    faces = face_cascade.detectMultiScale(gray, 1.1, 2)
+    faces = face_cascade.detectMultiScale(gray, 1.2, 2)
 
     if last_faces is not False and len(last_faces) > 0:
 
@@ -90,9 +132,10 @@ def update():
         for face_prev in last_faces:
           if best_match is not False and np.linalg.norm(np.array(best_match)[0:2] - np.array(face)[0:2]) > np.linalg.norm(np.array(face_prev)[0:2] - np.array(face)[0:2]):
             best_match = face_prev
-        if best_match is not False:
-          face[2] = face[2] * 0.2 + best_match[2] * 0.8
-          face[3] = face[3] * 0.2 + best_match[3] * 0.8
+        if False:
+            if best_match is not False:
+              face[2] = face[2] * 0.2 + best_match[2] * 0.8
+              face[3] = face[3] * 0.2 + best_match[3] * 0.8
 
     last_faces = faces
 
@@ -104,18 +147,23 @@ def update():
     d[m] = depth[m]
 
     d = cv2.medianBlur(d, 7)
-    d = cv2.erode(d, np.ones((3,3),np.uint8), iterations = 15)
+    d = cv2.erode(d, np.ones((2,2),np.uint8), iterations = 15)
 
     d[d == 1024] = 0
 
-    dx = cv2.Sobel(d, cv2.CV_32F, 1, 0, ksize = 5)
-    dy = cv2.Sobel(d, cv2.CV_32F, 0, 1, ksize = 5)
+    dx = cv2.Sobel(d, cv2.CV_32F, 1, 0, ksize = 7)
+    dy = cv2.Sobel(d, cv2.CV_32F, 0, 1, ksize = 7)
     edges = cv2.max(cv2.max(dx, -dx), cv2.max(dy, -dy))
-    edges = edges * 0.1
+    edges = edges * 0.03
+
+    ee = cv2.medianBlur(edges, 7)
+    dx = cv2.Sobel(ee, cv2.CV_32F, 1, 0, ksize = 7)
+    dy = cv2.Sobel(ee, cv2.CV_32F, 0, 1, ksize = 7)
+    edges = cv2.max(cv2.max(dx, -dx), cv2.max(dy, -dy)) * 0.015
 
     #d[edges > 0.5] = 0.0
 
-    cv2.imshow("edges", edges)
+    #cv2.imshow("edges", edges)
 
     #edges = cv2.dilate(edges, np.ones((3,3),np.uint8), iterations = 7
 
@@ -139,8 +187,8 @@ def update():
             floodFill2(d2, mask, (t, int((h - t - t) * f + t)), 0)
             floodFill2(d2, mask, (w - t, int((h - t - t) * f + t)), 0)
 
-    #d2 = cv2.medianBlur(d2, 7)
-    #d2 = cv2.dilate(d2, np.ones((3, 3),np.uint8), iterations = 7)
+    d2 = cv2.medianBlur(d2, 3)
+    d2 = cv2.dilate(d2, np.ones((3, 3),np.uint8), iterations = 3)
 
     faces = sorted(faces, key=lambda x: x[2] * x[3], reverse=True)
 
@@ -149,7 +197,7 @@ def update():
     (clustercount, clusters, stats, centroids) = cv2.connectedComponentsWithStats(d2, 8, cv2.CV_32S)
     clusters2 = np.zeros(clusters.shape, np.uint8)
     clusters2[:,:] = clusters[:,:] * 100
-    cv2.imshow("clusters", clusters2)
+    #cv2.imshow("clusters", clusters2)
 
     for (x,y,w,h) in faces:
       if d2[y, x + w / 2] > 0 and d2[y, x + w / 2] != 100:
@@ -159,13 +207,13 @@ def update():
 
 
 
-    cv2.imshow("depth", d * 100.0)
+    #cv2.imshow("depth", d * 100.0)
 
 
 
-    cv2.imshow("depth2", d2)
+    #cv2.imshow("depth2", d2)
 
-    d2 = cv2.erode(d2, np.ones((3,3),np.uint8), iterations = 15)
+    #d2 = cv2.erode(d2, np.ones((3,3),np.uint8), iterations = 15)
 
     image2 = image.copy()
     image2[d2 == 100,0] = 0
@@ -186,6 +234,8 @@ def update():
       cv2.circle(image_d, (x + w / 2, y + h / 2), s / 2, (0,0,255), 4)
 
     #image_c[edges > 0.1,:] = 0;
+
+    msg_person_detections = person_detection.msg.PersonDetections()
 
     for (x,y,w,h) in faces2:
 
@@ -217,24 +267,39 @@ def update():
         #print m.shape, image.shape
         image = numpy.asarray(PIL.Image.alpha_composite(PIL.Image.fromarray(image), PIL.Image.fromarray(m)))
 
+        msg_person_detection = person_detection.msg.PersonDetection()
+        msg_person_detection.x = (x * 2.0 / image.shape[1] - 1.0) * image.shape[1] / image.shape[0]
+        msg_person_detection.y = -(y * 2.0 / image.shape[0] - 1.0)
+        msg_person_detection.size = w * 2.0 / image.shape[1]
+        msg_person_detections.detections.append(msg_person_detection)
+
+    pub_person_detections.publish(msg_person_detections)
+
 
     image_c = image_c * (1.0 / 255)
     image_c[:,:,1] = depth
 
-    cv2.imshow("image_c", image_c)
+    #cv2.imshow("image_c", image_c)
 
-    cv2.imshow("image_d", image_d)
+    #cv2.imshow("image_d", image_d)
 
-    cv2.imshow("depth", depth)
+    #cv2.imshow("depth", depth)
 
-    cv2.imshow("image", image)
+    #cv2.imshow("image", image)
+
+    #cv2.imshow("image", image)
+
+    image = image[:,:,0:3]
+
+    pub_image_visualization.publish(bridge.cv2_to_imgmsg(image, "bgr8"))
 
     cv2.waitKey(1)
 
 
 
-image_sub = rospy.Subscriber("/camera/rgb/image_rect_color", Image, image_callback)
-
+#image_sub = rospy.Subscriber("/camera/rgb/image_rect_color", Image, image_callback)
+#image_sub = rospy.Subscriber(rospy.get_param("camera_topic_color"), Image, image_callback)
+image_sub = rospy.Subscriber("camera_rgb", Image, image_callback)
 
 def depth_callback(data):
     global bridge, depth
@@ -250,12 +315,15 @@ def depth_callback(data):
     #cv2.imshow("depth", image)
     #cv2.waitKey(1)
 
-depth_sub = rospy.Subscriber("/camera/depth_registered/image_raw", Image, depth_callback)
+#depth_sub = rospy.Subscriber("/camera/depth_registered/image_raw", Image, depth_callback)
+#depth_sub = rospy.Subscriber(rospy.get_param("camera_topic_depth"), Image, depth_callback)
+depth_sub = rospy.Subscriber("camera_depth", Image, depth_callback)
 
-
-rospy.init_node("faces", anonymous=True)
 #rospy.spin()
 
 while not rospy.is_shutdown():
-  #rospy.spinOnce()
-  update()
+  if enabled:
+    update()
+    rospy.sleep(0.01)
+  else:
+    rospy.sleep(0.2)

@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<launch>
+  <node pkg="person_detection" type="person_detection" respawn="false" name="person_detection" output="screen">
+    <param name="face_marker" value="$(find person_detection)/images/smiley.png"/>
+    <!-- <remap from="camera_rgb" to="/camera/rgb/image_rect_color"/>
+    <remap from="camera_depth" to="/camera/depth_registered/image_raw"/> -->
+    <remap from="camera_rgb" to="/xtion/rgb/image_rect_color"/>
+    <remap from="camera_depth" to="/xtion/depth_registered/image_raw"/>
+    <param name="face_detector_model" value="/usr/share/opencv/haarcascades/haarcascade_frontalface_alt2.xml"/>
+  </node>
+</launch>
