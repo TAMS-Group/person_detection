@@ -8,3 +8,9 @@ float64 x
 float64 y
 
 float64 size
+
+# Direction vector to the person
+geometry_msgs/Vector3 direction
+
+# Position of the person in camera coordinates
+geometry_msgs/Point position

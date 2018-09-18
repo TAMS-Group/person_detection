@@ -1,11 +1,15 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <launch>
+  <arg name="enabled" default="false"/>
   <node pkg="person_detection" type="person_detection" respawn="false" name="person_detection" output="screen">
     <param name="face_marker" value="$(find person_detection)/images/smiley.png"/>
+    <param name="enabled" value="$(arg enabled)"/>
     <!-- <remap from="camera_rgb" to="/camera/rgb/image_rect_color"/>
     <remap from="camera_depth" to="/camera/depth_registered/image_raw"/> -->
     <remap from="camera_rgb" to="/xtion/rgb/image_rect_color"/>
     <remap from="camera_depth" to="/xtion/depth_registered/image_raw"/>
+    <remap from="camera_depth_info" to="/xtion/depth_registered/camera_info"/>
+    <param name="camera_depth_frame" value="xtion_depth_optical_frame"/>
     <param name="face_detector_model" value="/usr/share/opencv/haarcascades/haarcascade_frontalface_alt2.xml"/>
   </node>
 </launch>

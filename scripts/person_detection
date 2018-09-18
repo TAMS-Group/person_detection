@@ -14,6 +14,9 @@ import sensor_msgs
 import std_msgs
 import person_detection
 import person_detection.msg
+import sensor_msgs.msg
+import tf
+import visualization_msgs.msg
 
 rospy.init_node("person_detection", anonymous=True)
 
@@ -28,11 +31,14 @@ face_cascade = cv2.CascadeClassifier(db)
 bridge = CvBridge()
 
 pub_image_visualization = rospy.Publisher("~visualization", sensor_msgs.msg.Image)
+pub_image_clusters = rospy.Publisher("~clusters", sensor_msgs.msg.Image)
 
 #face_marker = cv2.imread('smiley-1635449_960_720.png', cv2.IMREAD_UNCHANGED)
 #print("a", rospy.search_param("face_marker"))
 #print("b", rospy.get_param(rospy.search_param("face_marker")))
 #face_marker = cv2.imread(rospy.get_param(rospy.search_param("face_marker")), cv2.IMREAD_UNCHANGED)
+
+#tf_listener = tf.TransformListener()
 
 face_marker = rospy.get_param("~face_marker")
 print("b", face_marker)
@@ -47,6 +53,8 @@ color_image = False
 #cv2.namedWindow("image", cv2.WINDOW_NORMAL)
 
 enabled = False
+
+enabled = rospy.get_param("~enabled", False)
 
 def enable(x):
     global enabled
@@ -66,9 +74,20 @@ def set_enabled(x):
 
 sub_enable = rospy.Subscriber("~enable", std_msgs.msg.Empty, enable)
 sub_disable = rospy.Subscriber("~disable", std_msgs.msg.Empty, disable)
-sub_disable = rospy.Subscriber("~set_enabled", std_msgs.msg.Bool, set_enabled)
+sub_enabled = rospy.Subscriber("~set_enabled", std_msgs.msg.Bool, set_enabled)
+
+camera_depth_info = False
+def on_camera_depth_info(msg):
+    global camera_depth_info
+    #print("bla")
+    camera_depth_info = msg
+sub_camera_depth_info = rospy.Subscriber("camera_depth_info", sensor_msgs.msg.CameraInfo, on_camera_depth_info)
+
+camera_depth_frame = rospy.get_param("~camera_depth_frame")
 
 pub_person_detections = rospy.Publisher("~person_detections", person_detection.msg.PersonDetections)
+
+pub_markers = rospy.Publisher("~person_markers", visualization_msgs.msg.MarkerArray)
 
 def image_callback(data):
     global bridge, face_cascade, depth, color_image
@@ -91,6 +110,9 @@ def update():
     #print "update"
 
     global bridge, face_cascade, depth, color_image, last_faces
+
+    if camera_depth_info is False:
+        return
 
     image = color_image
     if image is False:
@@ -121,7 +143,7 @@ def update():
     #cv2.imshow("gray", gray)
     #cv2.waitKey(1)
 
-    faces = face_cascade.detectMultiScale(gray, 1.2, 2)
+    faces = face_cascade.detectMultiScale(gray, 1.2, 1)
 
     if last_faces is not False and len(last_faces) > 0:
 
@@ -199,11 +221,18 @@ def update():
     clusters2[:,:] = clusters[:,:] * 100
     #cv2.imshow("clusters", clusters2)
 
+
+    pub_image_clusters.publish(bridge.cv2_to_imgmsg(clusters2, "mono8"))
+
+    #print(stats)
+
     for (x,y,w,h) in faces:
+      #print("face", x, y, w, h)
       if d2[y, x + w / 2] > 0 and d2[y, x + w / 2] != 100:
         #cv2.floodFill(d2, mask, (x + w / 2, y + h / 2), 100, 50)
+        z = d[y, x + w / 2]
         cv2.floodFill(d2, mask, (x + w / 2, y), 100, 50)
-        faces2.append((x, y, w, h))
+        faces2.append((x, y, w, h, z, ))
 
 
 
@@ -237,7 +266,11 @@ def update():
 
     msg_person_detections = person_detection.msg.PersonDetections()
 
-    for (x,y,w,h) in faces2:
+    markers = visualization_msgs.msg.MarkerArray()
+
+    i = 0
+
+    for (x,y,w,h,z) in faces2:
 
         #if d2[y, x] > 0:
         #cv2.rectangle(image, (x,y), (x+w,y+h), (255,0,0), 2)
@@ -248,6 +281,20 @@ def update():
         #y -= h / 6
         #w += w / 2
         #h += h / 2
+
+        K = np.array(camera_depth_info.K, dtype=float)
+        K = np.reshape(K, (3,3,))
+        #print(K)
+        screen_to_view = np.linalg.inv(K)
+        #print(screen_to_view)
+        point_on_screen = np.array([x, y, 1.0], dtype=float)
+        direction = np.dot(screen_to_view, point_on_screen)
+
+        position = direction * z
+        #print(position)
+
+        direction = direction / np.linalg.norm(direction)
+        #print(direction)
 
         x -= w / 2
         y -= h / 2
@@ -267,13 +314,66 @@ def update():
         #print m.shape, image.shape
         image = numpy.asarray(PIL.Image.alpha_composite(PIL.Image.fromarray(image), PIL.Image.fromarray(m)))
 
+
+
         msg_person_detection = person_detection.msg.PersonDetection()
+
         msg_person_detection.x = (x * 2.0 / image.shape[1] - 1.0) * image.shape[1] / image.shape[0]
         msg_person_detection.y = -(y * 2.0 / image.shape[0] - 1.0)
         msg_person_detection.size = w * 2.0 / image.shape[1]
+
+        msg_person_detection.direction.x = direction[0]
+        msg_person_detection.direction.y = direction[1]
+        msg_person_detection.direction.z = direction[2]
+
+        msg_person_detection.position.x = position[0]
+        msg_person_detection.position.y = position[1]
+        msg_person_detection.position.z = position[2]
+
         msg_person_detections.detections.append(msg_person_detection)
 
+
+        marker = visualization_msgs.msg.Marker()
+
+        #marker.header.stamp = rospy.Time.now()
+        marker.header.frame_id = camera_depth_frame
+
+        #marker.action = visualization_msgs.msg.Marker.ADD
+
+        marker.ns = "persons"
+        marker.id = i
+
+        marker.lifetime.secs = 1.0
+
+        marker.type = visualization_msgs.msg.Marker.SPHERE
+
+        marker.color.r = 0.0
+        marker.color.g = 1.0
+        marker.color.b = 0.0
+        marker.color.a = 1.0
+
+        marker.scale.x = 0.3
+        marker.scale.y = 0.3
+        marker.scale.z = 0.3
+
+        marker.pose.position.x = position[0]
+        marker.pose.position.y = position[1]
+        marker.pose.position.z = position[2]
+
+        marker.pose.orientation.x = 0;
+        marker.pose.orientation.y = 0;
+        marker.pose.orientation.z = 0;
+        marker.pose.orientation.w = 1;
+
+        marker.frame_locked = False
+
+        markers.markers.append(marker)
+
+        i = i + 1
+
     pub_person_detections.publish(msg_person_detections)
+
+    pub_markers.publish(markers)
 
 
     image_c = image_c * (1.0 / 255)

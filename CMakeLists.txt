@@ -10,31 +10,38 @@ add_compile_options($<$<CONFIG:Release>:-ffast-math>)
 find_package(OpenCV REQUIRED)
 
 find_package(catkin REQUIRED COMPONENTS
+  cv_bridge
+  geometry_msgs
+  message_generation
+  roscpp
+  sensor_msgs
+  std_srvs
   tf
   tf_conversions
-  roscpp
-  std_srvs
   visualization_msgs
-  sensor_msgs
-  cv_bridge
-  message_generation
 )
 
-add_message_files(FILES PersonDetection.msg PersonDetections.msg)
+add_message_files(
+  FILES
+  PersonDetection.msg
+  PersonDetections.msg
+)
 
 generate_messages(
-   DEPENDENCIES
-   std_msgs
+  DEPENDENCIES
+  std_msgs
+  geometry_msgs
 )
 
 catkin_package(
   CATKIN_DEPENDS
+  cv_bridge
+  geometry_msgs
+  message_runtime
   roscpp
+  sensor_msgs
   tf
   tf_conversions
-  sensor_msgs
-  cv_bridge
-  message_runtime
 )
 
 include_directories(
