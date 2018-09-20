@@ -10,6 +10,7 @@
     <remap from="camera_depth" to="/xtion/depth_registered/image_raw"/>
     <remap from="camera_depth_info" to="/xtion/depth_registered/camera_info"/>
     <param name="camera_depth_frame" value="xtion_depth_optical_frame"/>
-    <param name="face_detector_model" value="/usr/share/opencv/haarcascades/haarcascade_frontalface_alt2.xml"/>
+    <!--<param name="face_detector_model" value="/usr/share/opencv/haarcascades/haarcascade_frontalface_alt2.xml"/>-->
+    <param name="face_detector_model" value="/opt/ros/kinetic/share/OpenCV-3.3.1-dev/haarcascades/haarcascade_frontalface_alt2.xml"/>
   </node>
 </launch>
