@@ -9,7 +9,6 @@ from cv_bridge import CvBridge, CvBridgeError
 import PIL.Image
 import numpy
 import numpy as np
-#import operator
 import sensor_msgs
 import std_msgs
 import person_detection
@@ -17,8 +16,11 @@ import person_detection.msg
 import sensor_msgs.msg
 import tf
 import visualization_msgs.msg
+import compressed_depth_image_transport
 
 rospy.init_node("person_detection", anonymous=True)
+
+tf_listener = tf.TransformListener()
 
 #db = "haarcascade_frontalface_default.xml"
 #db = "haarcascade_frontalface_alt.xml"
@@ -32,13 +34,7 @@ bridge = CvBridge()
 
 pub_image_visualization = rospy.Publisher("~visualization", sensor_msgs.msg.Image)
 pub_image_clusters = rospy.Publisher("~clusters", sensor_msgs.msg.Image)
-
-#face_marker = cv2.imread('smiley-1635449_960_720.png', cv2.IMREAD_UNCHANGED)
-#print("a", rospy.search_param("face_marker"))
-#print("b", rospy.get_param(rospy.search_param("face_marker")))
-#face_marker = cv2.imread(rospy.get_param(rospy.search_param("face_marker")), cv2.IMREAD_UNCHANGED)
-
-#tf_listener = tf.TransformListener()
+pub_image_points = rospy.Publisher("~points", sensor_msgs.msg.Image)
 
 face_marker = rospy.get_param("~face_marker")
 print("b", face_marker)
@@ -48,9 +44,9 @@ face_marker[:,:,3] -= face_marker[:,:,3] / 3
 
 depth = False
 
-color_image = False
+depth_image_header = False
 
-#cv2.namedWindow("image", cv2.WINDOW_NORMAL)
+color_image = False
 
 enabled = False
 
@@ -72,16 +68,16 @@ def set_enabled(x):
     print("set_enabled", x)
     enabled = x
 
-sub_enable = rospy.Subscriber("~enable", std_msgs.msg.Empty, enable)
-sub_disable = rospy.Subscriber("~disable", std_msgs.msg.Empty, disable)
-sub_enabled = rospy.Subscriber("~set_enabled", std_msgs.msg.Bool, set_enabled)
+sub_enable = rospy.Subscriber("~enable", std_msgs.msg.Empty, enable, queue_size=1)
+sub_disable = rospy.Subscriber("~disable", std_msgs.msg.Empty, disable, queue_size=1)
+sub_enabled = rospy.Subscriber("~set_enabled", std_msgs.msg.Bool, set_enabled, queue_size=1)
 
 camera_depth_info = False
 def on_camera_depth_info(msg):
     global camera_depth_info
     #print("bla")
     camera_depth_info = msg
-sub_camera_depth_info = rospy.Subscriber("camera_depth_info", sensor_msgs.msg.CameraInfo, on_camera_depth_info)
+sub_camera_depth_info = rospy.Subscriber("camera_depth_info", sensor_msgs.msg.CameraInfo, on_camera_depth_info, queue_size=1)
 
 camera_depth_frame = rospy.get_param("~camera_depth_frame")
 
@@ -93,7 +89,7 @@ def image_callback(data):
     global bridge, face_cascade, depth, color_image
 
     try:
-        image = bridge.imgmsg_to_cv2(data, "bgra8")
+        image = bridge.compressed_imgmsg_to_cv2(data, "bgra8")
     except CvBridgeError as e:
         print(e)
         return
@@ -107,12 +103,22 @@ def floodFill2(image, mask, point, value):
 last_faces = False
 
 def update():
-    #print "update"
 
     global bridge, face_cascade, depth, color_image, last_faces
 
     if camera_depth_info is False:
         return
+
+    if depth_image_header is False:
+        return
+
+
+
+    K = np.array(camera_depth_info.K, dtype=float)
+    K = np.reshape(K, (3,3,))
+
+    view_to_px = np.reshape(camera_depth_info.K, (3,3,))
+    px_to_view = np.linalg.inv(view_to_px)
 
     image = color_image
     if image is False:
@@ -128,11 +134,6 @@ def update():
     w = color_image.shape[1]
     h = color_image.shape[0]
     image = image[y:y+h,x:x+w,:]
-    #print x, y, w, h, image.shape
-
-    #a = cv2.getRotationMatrix2D((m.shape[0]/2, m.shape[1]/2), rospy.Time.now().to_sec() * 300, 1)
-    #image = cv2.warpAffine(image, a, (image.shape[0], image.shape[1]))
-
 
     if depth is False:
         print "no depth"
@@ -140,15 +141,9 @@ def update():
 
     gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
 
-    #cv2.imshow("gray", gray)
-    #cv2.waitKey(1)
-
     faces = face_cascade.detectMultiScale(gray, 1.2, 1)
 
     if last_faces is not False and len(last_faces) > 0:
-
-      #faces = [np.argmin(np.array(last_faces)[:,0:2] - np.array(face)[0:2]) for face in faces]
-
       for face in faces:
         best_match = last_faces[0]
         for face_prev in last_faces:
@@ -163,54 +158,130 @@ def update():
 
     d = depth.copy()
 
-    #d[d > 0.0] = 0.0
     d[:,:] = 1024
-    m = depth > 0.0
+    m = np.logical_and(depth > 0.0, np.isfinite(depth))
     d[m] = depth[m]
 
-    d = cv2.medianBlur(d, 7)
-    d = cv2.erode(d, np.ones((2,2),np.uint8), iterations = 15)
+    #d = cv2.medianBlur(d, 7)
+    #d = cv2.erode(d, np.ones((2,2),np.uint8), iterations = 15)
 
     d[d == 1024] = 0
 
-    dx = cv2.Sobel(d, cv2.CV_32F, 1, 0, ksize = 7)
-    dy = cv2.Sobel(d, cv2.CV_32F, 0, 1, ksize = 7)
-    edges = cv2.max(cv2.max(dx, -dx), cv2.max(dy, -dy))
-    edges = edges * 0.03
+    #dx = cv2.Sobel(d, cv2.CV_32F, 1, 0, ksize = 7)
+    #dy = cv2.Sobel(d, cv2.CV_32F, 0, 1, ksize = 7)
+    #edges = cv2.max(cv2.max(dx, -dx), cv2.max(dy, -dy))
+    #edges = edges * 0.03
 
-    ee = cv2.medianBlur(edges, 7)
-    dx = cv2.Sobel(ee, cv2.CV_32F, 1, 0, ksize = 7)
-    dy = cv2.Sobel(ee, cv2.CV_32F, 0, 1, ksize = 7)
-    edges = cv2.max(cv2.max(dx, -dx), cv2.max(dy, -dy)) * 0.015
+    #ee = cv2.medianBlur(edges, 7)
+    #dx = cv2.Sobel(ee, cv2.CV_32F, 1, 0, ksize = 7)
+    #dy = cv2.Sobel(ee, cv2.CV_32F, 0, 1, ksize = 7)
+    #edges = cv2.max(cv2.max(dx, -dx), cv2.max(dy, -dy)) * 0.015
 
-    #d[edges > 0.5] = 0.0
+    d = d * (1.0 / 1000)
 
-    #cv2.imshow("edges", edges)
+    depth_image = d
 
-    #edges = cv2.dilate(edges, np.ones((3,3),np.uint8), iterations = 7
+    points = np.zeros((depth_image.shape[0], depth_image.shape[1], 3))
+    points[:,:,0] = np.multiply(depth_image, np.repeat([np.arange(0, depth_image.shape[1])], depth_image.shape[0], 0) * px_to_view[0, 0] + px_to_view[0, 2])
+    points[:,:,1] = np.multiply(depth_image, np.reshape(np.repeat(np.arange(0, depth_image.shape[0]), depth_image.shape[1], 0), depth_image.shape) * px_to_view[1, 1] + px_to_view[1, 2])
+    points[:,:,2] = depth_image
 
-    #d2 = d.copy()
+    #view_to_world = tf_listener.lookupTransform("map", depth_image_header.frame_id, depth_image_header.stamp)
+    view_to_world = tf_listener.lookupTransform(rospy.get_param("/tiago_bartender/customer_zone/frame"), depth_image_header.frame_id, tf_listener.getLatestCommonTime("map", depth_image_header.frame_id))
+    print view_to_world
+
+    '''
+    view_to_world_rotation = tf.transformations.quaternion_matrix(view_to_world[1])
+    view_to_world_translation = view_to_world[0]
+
+    pp = points.copy()
+    for i in range(3):
+        points[:,:,i] = pp[:,:,0]*view_to_world_rotation[i,0] + pp[:,:,1]*view_to_world_rotation[i,1] + pp[:,:,2]*view_to_world_rotation[i,2] + view_to_world_translation[i]
+    '''
+
+    view_to_world = np.dot(tf.transformations.translation_matrix(view_to_world[0]), tf.transformations.quaternion_matrix(view_to_world[1]))
+    print "view_to_world", view_to_world
+
+    zone_to_world_translation = (
+        rospy.get_param("/tiago_bartender/customer_zone/center_x"),
+        rospy.get_param("/tiago_bartender/customer_zone/center_y"),
+        rospy.get_param("/tiago_bartender/customer_zone/center_z"),
+        )
+    zone_to_world_rotation = (0, 0, rospy.get_param("/tiago_bartender/customer_zone/euler_z"))
+    zone_to_world_scaling = (
+        rospy.get_param("/tiago_bartender/customer_zone/size_x"),
+        rospy.get_param("/tiago_bartender/customer_zone/size_y"),
+        rospy.get_param("/tiago_bartender/customer_zone/size_z"),
+        )
+    zone_to_world = tf.transformations.compose_matrix(
+        scale=zone_to_world_scaling,
+        angles=zone_to_world_rotation,
+        translate=zone_to_world_translation,
+    )
+    print "zone_to_world", zone_to_world
+
+    view_to_zone = np.dot(np.linalg.inv(zone_to_world), view_to_world)
+    print "view_to_zone", view_to_zone
+
+    pp = points.copy()
+    for i in range(3):
+        points[:,:,i] = pp[:,:,0] * view_to_zone[i,0] + pp[:,:,1] * view_to_zone[i,1] + pp[:,:,2] * view_to_zone[i,2] + view_to_zone[i,3]
+
+    pub_image_points.publish(bridge.cv2_to_imgmsg((points[:,:,2] * 20 + 127).astype(np.uint8), "passthrough"))
+
+    boxtest = np.ones(d.shape)
+
+    boxtest[d >= 1024] = 0
+    boxtest[d <= 0] = 0
+
+    #boxtest[points[:,:,2] < 0.9] = 0
+    #boxtest[points[:,:,2] > 2.1] = 0
+
+    #boxtest[points[:,:,0] < -1.0] = 0
+    #boxtest[points[:,:,0] > 5.0] = 0
+
+    boxtest[points[:,:,0] < -0.5] = 0
+    boxtest[points[:,:,0] > +0.5] = 0
+
+    boxtest[points[:,:,1] < -0.5] = 0
+    boxtest[points[:,:,1] > +0.5] = 0
+
+    boxtest[points[:,:,2] < -0.5] = 0
+    boxtest[points[:,:,2] > +0.5] = 0
+
+    points[boxtest == 0] = [0,0,0]
+    d[boxtest == 0] = 0
+
+    d[d <= 0] = 1024
+    d = cv2.erode(d, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 25)), iterations=3)
+    d[d >= 1024] = 0
+
+    threshold = 0.3
+    d[np.abs(d - cv2.dilate(d, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5)), iterations=1)) > threshold] = 0
+    d[np.abs(d - cv2.erode(d, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5)), iterations=1)) > threshold] = 0
+
+    #pub_image_points.publish(bridge.cv2_to_imgmsg((points * 50 + 127).astype(np.uint8), "passthrough"))
+    #pub_image_points.publish(bridge.cv2_to_imgmsg((points[:,:,:] * 20 + 127).astype(np.uint8), "passthrough"))
+
     d2 = np.zeros(d.shape[:2], np.uint8)
     d2[:,:] = 255
-    d2[edges > 1.0] = 0
+    #d2[edges > 1.0] = 0
     d2[d <= 0.0] = 0
 
     mask = np.zeros((d.shape[0] + 2, d.shape[1] + 2), np.uint8)
 
-
     w = d2.shape[1] - 1
     h = d2.shape[0] - 1
 
-    if True:
-        t = 10
-        for f in np.arange(0, 1, 0.01):
-            floodFill2(d2, mask, (int((w - t - t) * f + t), t), 0)
-            #floodFill2(d2, mask, (int((w - d - d) * f + d), h - d), 0)
-            floodFill2(d2, mask, (t, int((h - t - t) * f + t)), 0)
-            floodFill2(d2, mask, (w - t, int((h - t - t) * f + t)), 0)
+    #if True:
+    #    t = 10
+    #    for f in np.arange(0, 1, 0.01):
+    #        floodFill2(d2, mask, (int((w - t - t) * f + t), t), 0)
+    #        floodFill2(d2, mask, (t, int((h - t - t) * f + t)), 0)
+    #        floodFill2(d2, mask, (w - t, int((h - t - t) * f + t)), 0)
 
-    d2 = cv2.medianBlur(d2, 3)
-    d2 = cv2.dilate(d2, np.ones((3, 3),np.uint8), iterations = 3)
+    #d2 = cv2.medianBlur(d2, 3)
+    #d2 = cv2.dilate(d2, np.ones((3, 3),np.uint8), iterations = 3)
 
     faces = sorted(faces, key=lambda x: x[2] * x[3], reverse=True)
 
@@ -219,30 +290,16 @@ def update():
     (clustercount, clusters, stats, centroids) = cv2.connectedComponentsWithStats(d2, 8, cv2.CV_32S)
     clusters2 = np.zeros(clusters.shape, np.uint8)
     clusters2[:,:] = clusters[:,:] * 100
-    #cv2.imshow("clusters", clusters2)
-
 
     pub_image_clusters.publish(bridge.cv2_to_imgmsg(clusters2, "mono8"))
 
-    #print(stats)
-
     for (x,y,w,h) in faces:
-      #print("face", x, y, w, h)
       if d2[y, x + w / 2] > 0 and d2[y, x + w / 2] != 100:
-        #cv2.floodFill(d2, mask, (x + w / 2, y + h / 2), 100, 50)
         z = d[y, x + w / 2]
         cv2.floodFill(d2, mask, (x + w / 2, y), 100, 50)
         faces2.append((x, y, w, h, z, ))
 
-
-
-    #cv2.imshow("depth", d * 100.0)
-
-
-
-    #cv2.imshow("depth2", d2)
-
-    #d2 = cv2.erode(d2, np.ones((3,3),np.uint8), iterations = 15)
+    #faces2 = faces
 
     image2 = image.copy()
     image2[d2 == 100,0] = 0
@@ -251,18 +308,14 @@ def update():
 
     image = image / 2 + image2 / 2
 
-
     image_d = d2
     image_d = cv2.cvtColor(image_d, cv2.COLOR_GRAY2BGR)
 
     image_c = image.copy()
     for (x,y,w,h) in faces:
-      #cv2.ellipse(image_c, (x, y), (w, h), 0, 0, 0, (0,0,255), 4)
       s = w / 2 + h / 2
       cv2.circle(image_c, (x + w / 2, y + h / 2), s / 2, (0,0,255), 4)
       cv2.circle(image_d, (x + w / 2, y + h / 2), s / 2, (0,0,255), 4)
-
-    #image_c[edges > 0.1,:] = 0;
 
     msg_person_detections = person_detection.msg.PersonDetections()
 
@@ -272,18 +325,7 @@ def update():
 
     for (x,y,w,h,z) in faces2:
 
-        #if d2[y, x] > 0:
-        #cv2.rectangle(image, (x,y), (x+w,y+h), (255,0,0), 2)
-        #m = cv2.resize(face_marker, (image.shape[1], image.shape[0]))
 
-        #x -= w / 4
-        #y -= h / 4
-        #y -= h / 6
-        #w += w / 2
-        #h += h / 2
-
-        K = np.array(camera_depth_info.K, dtype=float)
-        K = np.reshape(K, (3,3,))
         #print(K)
         screen_to_view = np.linalg.inv(K)
         #print(screen_to_view)
@@ -312,6 +354,7 @@ def update():
 
         m = cv2.copyMakeBorder(m, y, image.shape[0] - y - h, x, image.shape[1] - x - w, cv2.BORDER_CONSTANT, (0,0,0,0))
         #print m.shape, image.shape
+        #print image
         image = numpy.asarray(PIL.Image.alpha_composite(PIL.Image.fromarray(image), PIL.Image.fromarray(m)))
 
 
@@ -379,16 +422,6 @@ def update():
     image_c = image_c * (1.0 / 255)
     image_c[:,:,1] = depth
 
-    #cv2.imshow("image_c", image_c)
-
-    #cv2.imshow("image_d", image_d)
-
-    #cv2.imshow("depth", depth)
-
-    #cv2.imshow("image", image)
-
-    #cv2.imshow("image", image)
-
     image = image[:,:,0:3]
 
     pub_image_visualization.publish(bridge.cv2_to_imgmsg(image, "bgr8"))
@@ -397,12 +430,11 @@ def update():
 
 
 
-#image_sub = rospy.Subscriber("/camera/rgb/image_rect_color", Image, image_callback)
-#image_sub = rospy.Subscriber(rospy.get_param("camera_topic_color"), Image, image_callback)
-image_sub = rospy.Subscriber("camera_rgb", Image, image_callback)
+image_sub = rospy.Subscriber("camera_rgb", sensor_msgs.msg.CompressedImage, image_callback, queue_size=1)
+
 
 def depth_callback(data):
-    global bridge, depth
+    global bridge, depth, depth_image_header
 
     try:
         image = bridge.imgmsg_to_cv2(data)
@@ -412,14 +444,11 @@ def depth_callback(data):
 
     depth = image
 
-    #cv2.imshow("depth", image)
-    #cv2.waitKey(1)
+    depth_image_header = data.header
 
-#depth_sub = rospy.Subscriber("/camera/depth_registered/image_raw", Image, depth_callback)
-#depth_sub = rospy.Subscriber(rospy.get_param("camera_topic_depth"), Image, depth_callback)
-depth_sub = rospy.Subscriber("camera_depth", Image, depth_callback)
 
-#rospy.spin()
+depth_sub = rospy.Subscriber("camera_depth", sensor_msgs.msg.Image, depth_callback, queue_size=1)
+
 
 while not rospy.is_shutdown():
   if enabled:
