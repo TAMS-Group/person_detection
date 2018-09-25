@@ -188,7 +188,7 @@ def update():
 
     #view_to_world = tf_listener.lookupTransform("map", depth_image_header.frame_id, depth_image_header.stamp)
     view_to_world = tf_listener.lookupTransform(rospy.get_param("/tiago_bartender/customer_zone/frame"), depth_image_header.frame_id, tf_listener.getLatestCommonTime("map", depth_image_header.frame_id))
-    print view_to_world
+    #print view_to_world
 
     '''
     view_to_world_rotation = tf.transformations.quaternion_matrix(view_to_world[1])
@@ -200,7 +200,7 @@ def update():
     '''
 
     view_to_world = np.dot(tf.transformations.translation_matrix(view_to_world[0]), tf.transformations.quaternion_matrix(view_to_world[1]))
-    print "view_to_world", view_to_world
+    #print "view_to_world", view_to_world
 
     zone_to_world_translation = (
         rospy.get_param("/tiago_bartender/customer_zone/center_x"),
@@ -218,10 +218,10 @@ def update():
         angles=zone_to_world_rotation,
         translate=zone_to_world_translation,
     )
-    print "zone_to_world", zone_to_world
+    #print "zone_to_world", zone_to_world
 
     view_to_zone = np.dot(np.linalg.inv(zone_to_world), view_to_world)
-    print "view_to_zone", view_to_zone
+    #print "view_to_zone", view_to_zone
 
     pp = points.copy()
     for i in range(3):
