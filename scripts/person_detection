@@ -33,69 +33,86 @@ face_cascade = cv2.CascadeClassifier(db)
 
 bridge = CvBridge()
 
-pub_image_visualization = rospy.Publisher("~visualization", sensor_msgs.msg.Image)
-pub_image_clusters = rospy.Publisher("~clusters", sensor_msgs.msg.Image)
-pub_image_points = rospy.Publisher("~points", sensor_msgs.msg.Image)
+pub_image_visualization = rospy.Publisher("~visualization", sensor_msgs.msg.Image, queue_size=1)
+pub_image_clusters = rospy.Publisher("~clusters", sensor_msgs.msg.Image, queue_size=1)
+pub_image_points = rospy.Publisher("~points", sensor_msgs.msg.Image, queue_size=1)
 
 face_marker = rospy.get_param("~face_marker")
-print("b", face_marker)
+#print("b", face_marker)
 face_marker = cv2.imread(face_marker, cv2.IMREAD_UNCHANGED)
 
 face_marker[:,:,3] -= face_marker[:,:,3] / 3
 
 depth = False
-
 depth_image_header = False
+def depth_callback(data):
+    global bridge, depth, depth_image_header
+    try:
+        image = bridge.imgmsg_to_cv2(data)
+    except CvBridgeError as e:
+        print(e)
+        return
+    depth = image
+    depth_image_header = data.header
 
 color_image = False
-
-enabled = False
-
-enabled = rospy.get_param("~enabled", False)
-
-def enable(x):
-    global enabled
-    print("enable")
-    enabled = True
-
-def disable(x):
-    global enabled
-    print("disable")
-    enabled = False
-
-def set_enabled(x):
-    global enabled
-    x = x.data
-    print("set_enabled", x)
-    enabled = x
-
-sub_enable = rospy.Subscriber("~enable", std_msgs.msg.Empty, enable, queue_size=1)
-sub_disable = rospy.Subscriber("~disable", std_msgs.msg.Empty, disable, queue_size=1)
-sub_enabled = rospy.Subscriber("~set_enabled", std_msgs.msg.Bool, set_enabled, queue_size=1)
+def image_callback(data):
+    global bridge, face_cascade, depth, color_image
+    try:
+        image = bridge.compressed_imgmsg_to_cv2(data, "bgra8")
+    except CvBridgeError as e:
+        print(e)
+        return
+    color_image = image
 
 camera_depth_info = False
 def on_camera_depth_info(msg):
     global camera_depth_info
     #print("bla")
     camera_depth_info = msg
-sub_camera_depth_info = rospy.Subscriber("camera_depth_info", sensor_msgs.msg.CameraInfo, on_camera_depth_info, queue_size=1)
+
+enabled = False
+sub_camera_depth_info = False
+image_sub = False
+depth_sub = False
+def enable(x):
+    global enabled, sub_camera_depth_info, image_sub, depth_sub
+    if enabled: return
+    print("enable")
+    sub_camera_depth_info = rospy.Subscriber("camera_depth_info", sensor_msgs.msg.CameraInfo, on_camera_depth_info, queue_size=1)
+    image_sub = rospy.Subscriber("camera_rgb", sensor_msgs.msg.CompressedImage, image_callback, queue_size=1)
+    depth_sub = rospy.Subscriber("camera_depth", sensor_msgs.msg.Image, depth_callback, queue_size=1)
+    enabled = True
+def disable(x):
+    global enabled, sub_camera_depth_info, image_sub, depth_sub
+    if not enabled: return
+    print("disable")
+    sub_camera_depth_info.unregister()
+    image_sub.unregister()
+    depth_sub.unregister()
+    sub_camera_depth_info = False
+    image_sub = False
+    depth_sub = False
+    enabled = False
+def set_enabled(x):
+    global enabled
+    if not enabled and x:
+        enable()
+    if enabled and not x:
+        disable()
+if rospy.get_param("~enabled", False):
+    enable()
+sub_enable = rospy.Subscriber("~enable", std_msgs.msg.Empty, enable, queue_size=1)
+sub_disable = rospy.Subscriber("~disable", std_msgs.msg.Empty, disable, queue_size=1)
+sub_enabled = rospy.Subscriber("~set_enabled", std_msgs.msg.Bool, set_enabled, queue_size=1)
 
 camera_depth_frame = rospy.get_param("~camera_depth_frame")
 
-pub_person_detections = rospy.Publisher("~person_detections", person_detection.msg.PersonDetections)
+pub_person_detections = rospy.Publisher("~person_detections", person_detection.msg.PersonDetections, queue_size=1)
 
-pub_markers = rospy.Publisher("~person_markers", visualization_msgs.msg.MarkerArray)
+pub_markers = rospy.Publisher("~person_markers", visualization_msgs.msg.MarkerArray, queue_size=1)
 
-def image_callback(data):
-    global bridge, face_cascade, depth, color_image
 
-    try:
-        image = bridge.compressed_imgmsg_to_cv2(data, "bgra8")
-    except CvBridgeError as e:
-        print(e)
-        return
-
-    color_image = image
 
 def floodFill2(image, mask, point, value):
     if image[point[1], point[0]] > 0:
@@ -532,24 +549,12 @@ def update():
 
 
 
-image_sub = rospy.Subscriber("camera_rgb", sensor_msgs.msg.CompressedImage, image_callback, queue_size=1)
 
 
-def depth_callback(data):
-    global bridge, depth, depth_image_header
-
-    try:
-        image = bridge.imgmsg_to_cv2(data)
-    except CvBridgeError as e:
-        print(e)
-        return
-
-    depth = image
-
-    depth_image_header = data.header
 
 
-depth_sub = rospy.Subscriber("camera_depth", sensor_msgs.msg.Image, depth_callback, queue_size=1)
+
+
 
 
 while not rospy.is_shutdown():
