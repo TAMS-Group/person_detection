@@ -1,5 +1,7 @@
 # This message describes one detected person.
 
+std_msgs/Header header
+
 # x coordinate of the face center, scaling similar to y while respecting aspect ratio (eg. from -1.33 to +1.33)
 float64 x
 

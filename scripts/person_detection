@@ -97,11 +97,11 @@ def disable(x):
 def set_enabled(x):
     global enabled
     if not enabled and x:
-        enable()
+        enable(0)
     if enabled and not x:
-        disable()
+        disable(0)
 if rospy.get_param("~enabled", False):
-    enable()
+    enable(0)
 sub_enable = rospy.Subscriber("~enable", std_msgs.msg.Empty, enable, queue_size=1)
 sub_disable = rospy.Subscriber("~disable", std_msgs.msg.Empty, disable, queue_size=1)
 sub_enabled = rospy.Subscriber("~set_enabled", std_msgs.msg.Bool, set_enabled, queue_size=1)
@@ -379,6 +379,9 @@ def update():
 
         msg_person_detection = person_detection.msg.PersonDetection()
 
+        msg_person_detection.header.stamp = depth_image_header.stamp
+        msg_person_detection.header.frame_id = depth_image_header.frame_id
+
         msg_person_detection.x = (x * 2.0 / image.shape[1] - 1.0) * image.shape[1] / image.shape[0]
         msg_person_detection.y = -(y * 2.0 / image.shape[0] - 1.0)
         msg_person_detection.size = w * 2.0 / image.shape[1]
@@ -500,7 +503,7 @@ def update():
     vpoints = [[[q, p] for q in vpoints if np.sum(np.array(q) == np.array(p)) == 3] for p in vpoints]
     #vpoints = [[[q, p] for q in vpoints] for p in vpoints]
     vpoints = np.reshape(vpoints, [-1, 4])
-    print vpoints
+    #print vpoints
 
     for p in vpoints:
         p = np.dot(zone_to_view, p)

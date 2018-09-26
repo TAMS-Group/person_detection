@@ -19,6 +19,7 @@ find_package(catkin REQUIRED COMPONENTS
   tf
   tf_conversions
   visualization_msgs
+  std_msgs
 )
 
 add_message_files(
