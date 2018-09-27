@@ -96,6 +96,7 @@ def disable(x):
     enabled = False
 def set_enabled(x):
     global enabled
+    x = x.data
     if not enabled and x:
         enable(0)
     if enabled and not x:
